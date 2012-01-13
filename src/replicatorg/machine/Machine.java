@@ -51,16 +51,16 @@ import replicatorg.util.Point5d;
  * are performed asynchronously by a thread maintained by the MachineController;
  * calls to MachineController ordinarily trigger an operation and return
  * immediately.
- * 
+ *
  * When the machine is paused, the machine thread waits on notification to the
  * machine thread object.
- * 
+ *
  * In general, the machine thread should *not* be interrupted, as this can cause
  * synchronization issues. Interruption should only really happen on hanging
  * connections and shutdown.
- * 
+ *
  * @author phooky
- * 
+ *
  */
 public class Machine implements MachineInterface {
 
@@ -90,8 +90,8 @@ public class Machine implements MachineInterface {
 		// Interactive command
 		RUN_COMMAND, // Run a single command on the driver, interleaved with the
 						// build.
-		
-		SHUTDOWN,	// Stop build (disconnect if building remotely), and stop the thread. 
+
+		SHUTDOWN,	// Stop build (disconnect if building remotely), and stop the thread.
 	}
 
 	public enum JobTarget {
@@ -120,7 +120,7 @@ public class Machine implements MachineInterface {
 	/**
 	 * Get the machine state. This is a snapshot of the state when the method
 	 * was called, not a live object.
-	 * 
+	 *
 	 * @return a copy of the machine's state object
 	 */
 	public MachineState getMachineState() {
@@ -129,7 +129,7 @@ public class Machine implements MachineInterface {
 
 	MachineThread machineThread;
 	final MachineCallbackHandler callbackHandler;
-	
+
 	// TODO: WTF is this here for.
 	// this is the xml config for this machine.
 	protected Node machineNode;
@@ -143,8 +143,8 @@ public class Machine implements MachineInterface {
 	 * Creates the machine object.
 	 */
 	public Machine(Node mNode, MachineCallbackHandler callbackHandler) {
-		this.callbackHandler = callbackHandler; 
-		
+		this.callbackHandler = callbackHandler;
+
 		machineNode = mNode;
 		machineThread = new MachineThread(this, mNode);
 		machineThread.start();
@@ -155,13 +155,13 @@ public class Machine implements MachineInterface {
 				RequestType.BUILD_REMOTE, null, remoteName));
 		return true;
 	}
-	
+
 	// The estimate function now checks for some sources of error
 	// needs a way to return failure
 	private String message;
 	private long numWarnings;
 	private long numErrors;
-	
+
 	/**
 	 * Begin running a job.
 	 */
@@ -175,17 +175,17 @@ public class Machine implements MachineInterface {
 
 		// estimate build time.
 		Base.logger.info("Estimating build time and scanning code for errors...");
-		
+
 		// reset any old failures/initialize to a failure free state
 		numWarnings = 0;
 		numErrors = 0;
 		message = null;
-		
+
 		estimate(source);
-		
+
 		if(numErrors > 0)
 		{
-			JOptionPane.showConfirmDialog(null, 
+			JOptionPane.showConfirmDialog(null,
 					new Object[]{"The pre-run check has found some problematic GCode.",
 					"This may be a result of trying to run code on a machine other than the one it's\n" +
 					"intended for (i.e. running dual headed GCode on a single headed machine).",
@@ -197,7 +197,7 @@ public class Machine implements MachineInterface {
 		}
 		else if(numWarnings > 0)
 		{
-			int proceed = JOptionPane.showConfirmDialog(null, 
+			int proceed = JOptionPane.showConfirmDialog(null,
 					new Object[]{"The pre-run check has found some potentially problematic GCode.",
 					"This may be a result of trying to run code on a machine other than the one it's\n" +
 					"intended for (i.e. running dual headed GCode on a single headed machine).",
@@ -205,18 +205,18 @@ public class Machine implements MachineInterface {
 					"\nWarning 1 of " + numWarnings + " (see console for more): " + message,
 					"\nWould you like to proceed with the build anyway?"},
 					"GCode Check: Warning", JOptionPane.OK_OPTION, JOptionPane.WARNING_MESSAGE);
-			
+
 			// I think this is the return value for "no"
 			if(proceed == 1)
 				return false;
 		}
-		
-		
+
+
 		// do that build!
 		Base.logger.info("Beginning build.");
 
 		machineThread.scheduleRequest(new MachineCommand(RequestType.BUILD_DIRECT, source, null));
-		
+
 		return true;
 	}
 
@@ -244,12 +244,12 @@ public class Machine implements MachineInterface {
 		EstimationDriver estimator = new EstimationDriver();
 		// TODO: Is this correct?
 		estimator.setMachine(machineThread.getModel());
-		
+
 		boolean safetyChecks = Base.preferences.getBoolean("build.safetyChecks", true);
-		
+
 		int nToolheads = machineThread.getModel().getTools().size();
 		Point5d maxRates = machineThread.getModel().getMaximumFeedrates();
-		
+
 		Queue<DriverCommand> estimatorQueue = new LinkedList<DriverCommand>();
 
 		GCodeParser estimatorParser = new GCodeParser();
@@ -265,12 +265,16 @@ public class Machine implements MachineInterface {
 				GCode gcLine = new GCode(line);
 				String s;
 
-				String mainCode = gcLine.getCommand().split(" ")[0];
+				String[] words = gcLine.getCommand().split(" ");
+				String mainCode = words[0];
+				if (mainCode.startsWith("N")) {
+				  mainCode = words.length >= 2 ? words[1] : "";
+				}
 				if(!("").equals(mainCode) && GCodeEnumeration.getGCode(mainCode) == null)
 				{
-					s = "Unsupported GCode!\n" + line + 
+					s = "Unsupported GCode!\n" + line +
 							" uses a code that ReplicatorG doesn't recognize.";
-					
+
 					//only take the first message
 					if(message == null)
 						message = s + '\n';
@@ -278,7 +282,7 @@ public class Machine implements MachineInterface {
 					Base.logger.log(Level.SEVERE, s);
 					numErrors++;
 				}
-				
+
 				// we're going to check for the correct number of toolheads in each command
 				// the list of exceptions keeps growing, do we really need to do this check?
 				// maybe we should just specify the things to check, rather than the reverse
@@ -286,13 +290,13 @@ public class Machine implements MachineInterface {
 														   && gcLine.getCodeValue('M') != 106
 														   && gcLine.getCodeValue('M') != 107)
 				{
-					s = "Too Many Toolheads!\n" + line + 
+					s = "Too Many Toolheads!\n" + line +
 							" makes reference to a non-existent toolhead.";
-					
+
 					//only take the first message
 					if(message == null)
 						message = s + '\n';
-					
+
 					Base.logger.log(Level.SEVERE, s);
 					numErrors++;
 				}
@@ -301,24 +305,24 @@ public class Machine implements MachineInterface {
 					double fVal = gcLine.getCodeValue('F');
 					if( (gcLine.hasCode('X') && fVal > maxRates.x()) ||
 						(gcLine.hasCode('Y') && fVal > maxRates.y()) ||
-	// we're going to ignore this for now, since most of the time the z isn't actually moving 
-	//					(gcLine.hasCode('Z') && fVal > maxRates.z()) ||  
+	// we're going to ignore this for now, since most of the time the z isn't actually moving
+	//					(gcLine.hasCode('Z') && fVal > maxRates.z()) ||
 						(gcLine.hasCode('A') && fVal > maxRates.a()) ||
 						(gcLine.hasCode('B') && fVal > maxRates.b()))
 					{
 						s = "You're moving too fast!\n" +
 								 line + " Tries to turn an axis faster than its max rate.";
-						
+
 						//only take the first message
 						if(message == null)
 							message = s + '\n';
-						
+
 						Base.logger.log(Level.WARNING, s);
 						numWarnings++;
 					}
 				}
 			}
-			
+
 			for (DriverCommand command : estimatorQueue) {
 				try {
 					command.run(estimator);
@@ -367,7 +371,7 @@ public class Machine implements MachineInterface {
 		machineThread.scheduleRequest(new MachineCommand(RequestType.STOP_MOTION,
 				null, null));
 	}
-	
+
 	public void stopAll() {
 		machineThread.scheduleRequest(new MachineCommand(RequestType.STOP_ALL,
 				null, null));
@@ -385,7 +389,7 @@ public class Machine implements MachineInterface {
 	public void upload(GCodeSource source, String remoteName) {
 		/**
 		 * Upload the gcode to the given remote SD name.
-		 * 
+		 *
 		 * @param source
 		 * @param remoteName
 		 */
@@ -396,7 +400,7 @@ public class Machine implements MachineInterface {
 	public void buildToFile(GCodeSource source, String path) {
 		/**
 		 * Upload the gcode to the given file.
-		 * 
+		 *
 		 * @param source
 		 * @param remoteName
 		 */
@@ -422,7 +426,7 @@ public class Machine implements MachineInterface {
 			machineThread = new MachineThread(this, machineNode);
 			machineThread.start();
 		}
-		
+
 		machineThread.scheduleRequest(new MachineCommand(RequestType.CONNECT,
 				null, portName));
 	}
@@ -457,7 +461,7 @@ public class Machine implements MachineInterface {
 
 	protected void emitStateChange(MachineState current, String message) {
 		MachineStateChangeEvent e = new MachineStateChangeEvent(this, current, message);
-		
+
 		callbackHandler.schedule(e);
 	}
 
@@ -470,7 +474,7 @@ public class Machine implements MachineInterface {
 		callbackHandler.schedule(e);
 	}
 
-	
+
 	public int getLinesProcessed() {
 		/*
 		 * This is for jumping to the right line when aborting or pausing. This
