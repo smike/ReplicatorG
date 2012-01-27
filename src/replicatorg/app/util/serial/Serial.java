@@ -56,7 +56,7 @@ public class Serial implements SerialPortEventListener {
 
 	/** True if the device is connected **/
 	private AtomicBoolean connected = new AtomicBoolean(false);
-	
+
 	// Properties can be passed in for default values.
 	// Otherwise, we default to 9600 N81
 	private SerialPort port;
@@ -65,20 +65,20 @@ public class Serial implements SerialPortEventListener {
 	private int parity;
 	private int data;
 	private int stop;
-	
+
 	/**
 	 * The amount of time we're willing to wait for a read to timeout.  Defaults to 500ms.
 	 */
-	private int timeoutMillis = 500;
-	
+	private int timeoutMillis = 1000;
+
 	private ByteFifo readFifo = new ByteFifo();
-	
+
 	public final AtomicReference<SerialFifoEventListener> listener =
 		new AtomicReference<SerialFifoEventListener>();
-	
+
 	private InputStream input;
 	private OutputStream output;
-	
+
 	/**
 	 * Scan the port ids for a list of potential serial ports that we can use.
 	 * @return A vector of serial port names and availability information.
@@ -107,8 +107,8 @@ public class Serial implements SerialPortEventListener {
 			boolean contains = false;
 			for (Name vi : v) { // vector.contains doesn't use comparable.
 				if (vi.compareTo(n) == 0) {
-					contains = true; 
-					break; 
+					contains = true;
+					break;
 				}
 			}
 			if (!contains) { v.add(n); }
@@ -129,7 +129,7 @@ public class Serial implements SerialPortEventListener {
 							}
 						}
 					} catch (IOException ioe) {
-						// pass 
+						// pass
 					}
 				}
 			}
@@ -141,19 +141,19 @@ public class Serial implements SerialPortEventListener {
 	public Serial(String portName, int baudRate, char parity, int dataBits, int stopBits) throws SerialException {
 		init(portName, baudRate, parity, dataBits, stopBits);
 	}
-	
+
 	public Serial(String name) throws SerialException {
 		init(name,38400,'N',8,1);
 	}
-	
+
 	public String getName() { return name; }
-	
+
 
 	private CommPortIdentifier findPortIdentifier(String name) {
 		Enumeration<?> portList = CommPortIdentifier.getPortIdentifiers();
 		while (portList.hasMoreElements()) {
 			CommPortIdentifier id = (CommPortIdentifier)portList.nextElement();
-			if (id.getPortType() == CommPortIdentifier.PORT_SERIAL && 
+			if (id.getPortType() == CommPortIdentifier.PORT_SERIAL &&
 					id.getName().equals(name)) {
 				return id;
 			}
@@ -200,7 +200,7 @@ public class Serial implements SerialPortEventListener {
 					+ "'.", e);
 		}
 		portsInUse.add(this);
-		
+
 		connected.set(true);
 	}
 
@@ -209,11 +209,11 @@ public class Serial implements SerialPortEventListener {
 	 */
 	public synchronized void dispose() {
 		connected.set(false);
-		
+
 		if (port != null) {
 			port.removeEventListener();
 		}
-		
+
 		if (input != null) {
 			try {
 				input.close();
@@ -222,7 +222,7 @@ public class Serial implements SerialPortEventListener {
 			}
 			input = null;
 		}
-		
+
 		if (output != null) {
 			try {
 				output.close();
@@ -231,12 +231,12 @@ public class Serial implements SerialPortEventListener {
 			}
 			output = null;
 		}
-		
+
 		if (port != null) {
 			port.close();
 			port = null;
 		}
-		
+
 		portsInUse.remove(this);
 	}
 
@@ -254,26 +254,24 @@ public class Serial implements SerialPortEventListener {
 		port.setDTR(true);
 		port.setRTS(true);
 	}
-	
+
 	/**
-	 * polls the readFifo for new bytes. If numberOfBytes bytes are received or the 
-	 * wait times out the method returns zero. If a interrupt exception is thrown 
+	 * polls the readFifo for new bytes. If numberOfBytes bytes are received or the
+	 * wait times out the method returns zero. If a interrupt exception is thrown
 	 * the method returns -1.
 	 * @param numberOfBytes
 	 * @return
 	 */
-	private int waitForBytes(int numberOfBytes)
-	{
+	private int waitForBytes(int numberOfBytes) {
 		try {
 			long to = System.currentTimeMillis() + timeoutMillis;
-			while (System.currentTimeMillis() < to && readFifo.size() < numberOfBytes)
-			{
+			while (System.currentTimeMillis() <= to && readFifo.size() < numberOfBytes) {
 				/*
-				 * Wait until we timeout or a byte is received (which will notify this 
+				 * Wait until we timeout or a byte is received (which will notify this
 				 * method). readFifo notifies for each byte received.
 				 */
 				synchronized (readFifo) {
-					readFifo.wait(timeoutMillis);
+					readFifo.wait(100);
 				}
 			}
 		} catch (InterruptedException e) {
@@ -282,30 +280,45 @@ public class Serial implements SerialPortEventListener {
 			Thread.currentThread().interrupt();
 			return -1;
 		}
+
 		return 0;
 	}
-	
+
+	 public static String bytesToString(byte[] bytes) { return bytesToString(bytes, 16); }
+	  public static String bytesToString(byte[] bytes, int radix) {
+	    StringBuffer stringBuffer = new StringBuffer("[");
+	    for (int b : bytes) {
+	      int unsignedValue = b < 0 ? b + (1 << 8) : b;
+	      stringBuffer.append(Integer.toString(unsignedValue, radix).toUpperCase());
+	      stringBuffer.append(", ");
+	    }
+
+	    if (stringBuffer.length() > 1) {
+	      int lastCommaIndex = stringBuffer.lastIndexOf(", ");
+	      stringBuffer.replace(lastCommaIndex, lastCommaIndex+1, "");
+	    }
+
+	    stringBuffer.append("]");
+	    return stringBuffer.toString();
+	  }
+
 	/**
 	 * Attempt to read a single byte.
 	 * @return the byte read, or -1 to indicate a timeout.
 	 */
 	public int read() {
- 		//wait for the fifo to fill
-		if (waitForBytes(1) == -1) return -1;
-		//read the fifo
-		synchronized(readFifo) {
-			if (readFifo.size() > 0) {
-				byte b = readFifo.dequeue();
-				return b & 0xff; 
-			} else {
-				Base.logger.warning("Read timed out.");
-				return -1;
-			}
-		}
+	  byte bytes[] = new byte[1];
+	  int bytes_read = read(bytes);
+	  if (bytes_read == 1) {
+	    return bytes[0];
+	  } else {
+	    Base.logger.warning("Read timed out.");
+      return -1;
+	  }
 	}
 
 	/**
-	 * Attempt to fill the given buffer.  This method blocks until input data is available, 
+	 * Attempt to fill the given buffer.  This method blocks until input data is available,
 	 * end of file is detected, or an exception is thrown.  It is meant to emulate the
 	 * behavior of the call of the same signature on InputStream, with the significant
 	 * difference that it will terminate when the timeout is exceeded.
@@ -317,24 +330,26 @@ public class Serial implements SerialPortEventListener {
 		if (waitForBytes(bytes.length) == -1) return -1;
 		//read the fifo
 		synchronized(readFifo) {
-			int idx = 0;
-			while (readFifo.size() > 0 && idx < bytes.length) {
-				bytes[idx++] = readFifo.dequeue();
-			}
-			return idx;
+		  int idx = 0;
+		  while (readFifo.size() > 0 && idx < bytes.length) {
+		    bytes[idx++] = readFifo.dequeue();
+		  }
+		  Base.logger.fine("Received " + idx + " bytes: " +
+		      bytesToString(idx == 0 ? new byte[0] : bytes));
+		  return idx;
 		}
-	}
+ 	}
 
 	public void write(byte bytes[]) {
 		if (!connected.get()) {
 			Base.logger.severe("serial disconnected");
 			return;
 		}
-		
+
 		try {
 			output.write(bytes);
 			output.flush(); // Reconsider?
-
+			Base.logger.fine("Wrote " + bytes.length + " bytes: " + bytesToString(bytes));
 		} catch (Exception e) { // null pointer or serial port dead
 			Base.logger.severe( "serial error: \n" + e.getMessage() );
 		}
@@ -346,7 +361,7 @@ public class Serial implements SerialPortEventListener {
 	 * you mean to send a byte buffer (most often the case for networking and
 	 * serial i/o) and will only use the bottom 8 bits of each char in the
 	 * string. (Meaning that internally it uses String.getBytes)
-	 * 
+	 *
 	 * If you want to move Unicode data, you can first convert the String to a
 	 * byte stream in the representation of your choice (i.e. UTF8 or two-byte
 	 * Unicode data), and send it as a byte array.
@@ -370,7 +385,7 @@ public class Serial implements SerialPortEventListener {
 			// Either the machine is jabbering, or there's a problem with our serial
 			// connection.
 			int maxEats = 255;
-			
+
 			try {
 				while (input.available() > 0 && maxEats > 0) {
 					input.read();
@@ -395,22 +410,20 @@ public class Serial implements SerialPortEventListener {
 			}
 		}
 	}
-	
+
 	/**
-	 * Indicates if we've received 
+	 * Indicates if we've received
 	 */
 	public boolean isConnected() { return (connected.get()); }
 
 	public void serialEvent(SerialPortEvent event) {
-		if (event.getEventType() != SerialPortEvent.DATA_AVAILABLE) return;
+	  if (event.getEventType() != SerialPortEvent.DATA_AVAILABLE) return;
 		synchronized (readFifo) {
 			try {
 				while (true) {
-					synchronized(input)
-					{
-						if (input.available() == 0)
-						{
-							return;
+					synchronized(input) {
+						if (input.available() == 0) {
+							break;
 						}
 					}
 
@@ -420,8 +433,9 @@ public class Serial implements SerialPortEventListener {
 						//notify each byte received
 						readFifo.notifyAll();
 						SerialFifoEventListener l = listener.get();
-						if (l != null)
+						if (l != null) {
 							l.serialByteReceivedEvent(readFifo);
+						}
 					}
 				}
 			} catch (IOException e) {
@@ -440,5 +454,9 @@ public class Serial implements SerialPortEventListener {
 				}
 			}
 		}
+	}
+
+	public int available() throws IOException {
+	  return input.available() + readFifo.size();
 	}
 }
