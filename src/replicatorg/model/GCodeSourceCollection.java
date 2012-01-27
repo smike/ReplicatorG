@@ -11,32 +11,32 @@ import java.util.Vector;
  */
 public class GCodeSourceCollection implements GCodeSource {
 
-	final Vector<GCodeSource> sources; 
+	final Vector<GCodeSource> sources;
 	final int lineCount;
-	
+
 	public class GCodeSourceCollectionIterator implements Iterator<String> {
 		Vector<Iterator<String>> iterators;
-		
+
 		public GCodeSourceCollectionIterator(Vector<GCodeSource> sources) {
 			iterators = new Vector<Iterator<String>>();
-			
+
 			for (GCodeSource source : sources) {
 				iterators.add(source.iterator());
 			}
 		}
-		
+
 		@Override
 		public boolean hasNext() {
-			return (!iterators.isEmpty());
+			return !iterators.isEmpty() && iterators.firstElement().hasNext();
 		}
 
 		@Override
 		public String next() {
 			String next = null;
-			
+
 			if (hasNext()) {
 				next = iterators.firstElement().next();
-				
+
 				if (!iterators.firstElement().hasNext()) {
 					iterators.remove(0);
 				}
@@ -46,21 +46,25 @@ public class GCodeSourceCollection implements GCodeSource {
 
 		@Override
 		public void remove() {
-			
+		  throw new UnsupportedOperationException();
 		}
 	}
-	
+
 	public GCodeSourceCollection(Vector<GCodeSource> sources) {
-		this.sources = sources;
-		
+		this.sources = new Vector<GCodeSource>();
+
 		// Count the total number of lines
 		int lineCount = 0;
-		for(GCodeSource source: this.sources) {
-			lineCount += source.getLineCount();
+		for(GCodeSource source : sources) {
+			int sourceLineCount = source.getLineCount();
+			if (sourceLineCount > 0) {
+			  this.sources.add(source);
+			  lineCount += source.getLineCount();
+			}
 		}
 		this.lineCount = lineCount;
 	}
-	
+
 	@Override
 	public Iterator<String> iterator() {
 		return new GCodeSourceCollectionIterator(sources);
@@ -70,5 +74,4 @@ public class GCodeSourceCollection implements GCodeSource {
 	public int getLineCount() {
 		return lineCount;
 	}
-
 }
