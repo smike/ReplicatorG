@@ -42,7 +42,7 @@ public class MachineModel
 {
 	//our xml config info
 	protected Node xml = null;
-	
+
 	//our machine space
 	//private Point3d currentPosition;
 	@SuppressWarnings("unused")
@@ -52,28 +52,28 @@ public class MachineModel
 
 	// Which axes exist on this machine
 	private Set<AxisId> axes = EnumSet.noneOf(AxisId.class);
-	
+
 	//feedrate information
 	private Point5d maximumFeedrates;
 	private Point5d homingFeedrates;
 	private Point5d stepsPerMM;
         private Point5d timeOut;
-	
+
 	//our drive status
 	protected boolean drivesEnabled = true;
 	protected int gearRatio = 0;
-	
+
 	//our tool models
 	protected Vector<ToolModel> tools;
 	protected final AtomicReference<ToolModel> currentTool = new AtomicReference<ToolModel>();
 	protected final ToolModel nullTool = new ToolModel();
 
-	//our clamp models	
+	//our clamp models
 	protected Vector<ClampModel> clamps;
 
 	//our wipe models @Noah
 	protected  Vector<WipeModel> wipes = new Vector<WipeModel>();
-	
+
 	// our build volume
 	protected BuildVolume buildVolume;
 
@@ -85,7 +85,7 @@ public class MachineModel
 		clamps = new Vector<ClampModel>();
 		tools = new Vector<ToolModel>();
 		buildVolume = new BuildVolume(100,100,100); // preload it with the default values
-		
+
 		//currentPosition = new Point3d();
 		minimum = new Point5d();
 		maximum = new Point5d();
@@ -93,15 +93,15 @@ public class MachineModel
 		homingFeedrates = new Point5d();
 		timeOut = new Point5d();
 		stepsPerMM = new Point5d(1, 1, 1, 1, 1); //use ones, because we divide by this!
-		
+
 		currentTool.set(nullTool);
 	}
-	
+
 	//load data from xml config
 	public void loadXML(Node node)
 	{
 		xml = node;
-		
+
 		parseAxes();
 		parseClamps();
 		parseTools();
@@ -118,7 +118,7 @@ public class MachineModel
 			for (int i=0; i<exclusionKids.getLength(); i++)
 			{
 				Node exclusionZoneNode = exclusionKids.item(i);
-				
+
 				if (exclusionZoneNode.getNodeName().equals("wipe"))
 				{
 					WipeModel wipe = new WipeModel(exclusionZoneNode);
@@ -132,13 +132,13 @@ public class MachineModel
 		if(XML.hasChildNode(xml, "wipes"))
 		{
 			Node wipesNode = XML.getChildNodeByName(xml, "wipes");
-			
+
 			//look through the axes.
 			NodeList wipesKids = wipesNode.getChildNodes();
 			for (int i=0; i<wipesKids.getLength(); i++)
 			{
 				Node wipeNode = wipesKids.item(i);
-				
+
 				if (wipeNode.getNodeName().equals("wipe"))
 				{
 					WipeModel wipe = new WipeModel(wipeNode);
@@ -153,13 +153,13 @@ public class MachineModel
 		if(XML.hasChildNode(xml, "geometry"))
 		{
 			Node geometry = XML.getChildNodeByName(xml, "geometry");
-			
+
 			//look through the axes.
 			NodeList axisNodes = geometry.getChildNodes();
 			for (int i=0; i<axisNodes.getLength(); i++)
 			{
 				Node axis = axisNodes.item(i);
-				
+
 				if (axis.getNodeName().equals("axis"))
 				{
 					//parse our information.
@@ -216,12 +216,12 @@ public class MachineModel
 						timeOut.setAxis(id,timeout);
 						this.endstops.put(id, endstops);
 						Base.logger.fine("Loaded axis " + id.name()
-								+ ": (Length: " + length 
-								+ "mm, max feedrate: " + maxFeedrate 
+								+ ": (Length: " + length
+								+ "mm, max feedrate: " + maxFeedrate
 								+ " mm/min, homing feedrate: " + homingFeedrate
 								+ " mm/min, scale: " + stepspermm + " steps/mm"
 								 + "seconds, timeout: " + timeout + ")");
-						
+
 					} catch (IllegalArgumentException iae) {
 						// Unrecognized axis!
 						Base.logger.severe("Unrecognized axis "+idStr+" found in machine descriptor!");
@@ -231,41 +231,41 @@ public class MachineModel
 			}
 		}
 	}
-	
+
 	//load clamp configuration
 	private void parseClamps()
 	{
 		if(XML.hasChildNode(xml, "clamps"))
 		{
 			Node clampsNode = XML.getChildNodeByName(xml, "clamps");
-			
+
 			//look through the axes.
 			NodeList clampKids = clampsNode.getChildNodes();
 			for (int i=0; i<clampKids.getLength(); i++)
 			{
 				Node clampNode = clampKids.item(i);
-				
+
 				ClampModel clamp = new ClampModel(clampNode);
 				clamps.add(clamp);
-				
+
 				System.out.println("adding clamp #" + clamps.size());
 			}
 		}
 	}
-	
+
 	//load tool configuration
 	private void parseTools()
 	{
 		if(XML.hasChildNode(xml, "tools"))
 		{
 			Node toolsNode = XML.getChildNodeByName(xml, "tools");
-			
+
 			//look through the axes.
 			NodeList toolKids = toolsNode.getChildNodes();
 			for (int i=0; i<toolKids.getLength(); i++)
 			{
 				Node toolNode = toolKids.item(i);
-				
+
 				if (toolNode.getNodeName().equals("tool"))
 				{
 					ToolModel tool = new ToolModel(toolNode);
@@ -292,17 +292,17 @@ public class MachineModel
 	private void parseBuildVolume()
 	{
 //		Base.logger.info("parsing build volume!");
-		
+
 		if(XML.hasChildNode(xml, "geometry"))
 		{
 			Node geometry = XML.getChildNodeByName(xml, "geometry");
-			
+
 			//look through the axes.
 			NodeList axes = geometry.getChildNodes();
 			for (int i=0; i<axes.getLength(); i++)
 			{
 				Node axis = axes.item(i);
-				
+
 				if (axis.getNodeName().equals("axis"))
 				{
 					//parse our information.
@@ -310,12 +310,12 @@ public class MachineModel
 
 					//initialize values
 				 	double length = 100; // 100mm by default
-					
+
 					//if values are missing, ignore them.
 					try {
 					 	length = Double.parseDouble(XML.getAttributeValue(axis, "length"));
 					} catch (Exception e) {}
-					
+
 					//create the right variables.
 					if (id.toLowerCase().equals("x"))
 					{
@@ -332,13 +332,13 @@ public class MachineModel
 				}
 			}
 		}
-		
+
 	}
 
 	/*************************************
 	*  Reporting available axes
 	*************************************/
-	
+
 	/** Return a set enumerating all the axes that this machine has available.
 	 */
 	public Set<AxisId> getAvailableAxes() { return axes; }
@@ -347,7 +347,7 @@ public class MachineModel
 	 * @return true if the axis is available, false otherwise
 	 */
 	public boolean hasAxis(AxisId id) { return axes.contains(id); }
-	
+
 	/*************************************
 	*  Convert steps to millimeter units
 	*************************************/
@@ -356,10 +356,10 @@ public class MachineModel
 	{
 		Point5d temp = new Point5d();
 		temp.div(steps, stepsPerMM);
-		
+
 		return temp;
 	}
-	
+
 	/**
 	 * Get steps-mm conversion value
 	 */
@@ -374,7 +374,7 @@ public class MachineModel
 		Point5d temp = new Point5d();
 		temp.mul(mm,stepsPerMM);
 		temp.round(); // integer step counts please
-		
+
 		return temp;
 	}
 
@@ -400,17 +400,17 @@ public class MachineModel
 	{
 		drivesEnabled = true;
 	}
-	
+
 	public void disableDrives()
 	{
 		drivesEnabled = false;
 	}
-	
+
 	public boolean areDrivesEnabled()
 	{
 		return drivesEnabled;
 	}
-	
+
 	/*************************************
 	* Gear Ratio functions
 	*************************************/
@@ -418,7 +418,7 @@ public class MachineModel
 	{
 		gearRatio = ratioIndex;
 	}
-	
+
 	/*************************************
 	* Clamp interface functions
 	*************************************/
@@ -431,10 +431,10 @@ public class MachineModel
 			Base.logger.severe("Cannot get non-existant clamp (#" + index + ".");
 			e.printStackTrace();
 		}
-		
+
 		return null;
 	}
-	
+
 	/*************************************
 	*  Tool interface functions
 	*************************************/
@@ -442,21 +442,17 @@ public class MachineModel
 	{
 		synchronized(currentTool)
 		{
-			try {
+		  if (index < tools.size()) {
+		    ToolModel toolModel = tools.get(index);
 				currentTool.set( (ToolModel)tools.get(index) );
-				if (currentTool.get() == null) { 
-					Base.logger.severe("Cannot select non-existant tool (#" + index + ").");
-					currentTool.set(nullTool);
+				if (currentTool.get() != null) {
+				  currentTool.set(toolModel);
+				  return;
 				}
-			} catch (ArrayIndexOutOfBoundsException e) {
-				if (xml != null) { 
-					Base.logger.severe("Cannot select non-existant tool (#" + index + ").");
-				} else {
-					// If this machine is not configured, it's presumed it's a null machine
-					// and it's expected that toolheads are not specified.
-				}
-				currentTool.set(nullTool);
 			}
+
+		  Base.logger.severe("Cannot select non-existant tool (#" + index + ").");
+      currentTool.set(nullTool);
 		}
 	}
 
@@ -464,22 +460,21 @@ public class MachineModel
 	{
 		return currentTool.get();
 	}
-	
+
 	public ToolModel getTool(int index)
 	{
-		try {
+	  if (index < tools.size()) {
 			return tools.get(index);
-		} catch (ArrayIndexOutOfBoundsException e) {
-			Base.logger.severe("Cannot get nonexistent tool (#" + index + ".");
-			//e.printStackTrace();
-		}
+	  }
+
+	  Base.logger.severe("Cannot get nonexistent tool (#" + index + ".");
 		return null;
 	}
 	public BuildVolume getBuildVolume()
 	{
 		return buildVolume;
 	}
-	
+
 	public Vector<ToolModel> getTools()
 	{
 		return tools;
@@ -503,16 +498,15 @@ public class MachineModel
 	{
 		tools.add(t);
 	}
-	
-	
+
+
 	public void setTool(int index, ToolModel t)
 	{
-		try {
+		if (index < tools.size()) {
 			tools.set(index, t);
-		} catch (ArrayIndexOutOfBoundsException e) {
-			Base.logger.severe("Cannot set non-existant tool (#" + index + ".");
-			e.printStackTrace();
 		}
+
+		Base.logger.severe("Cannot set non-existant tool (#" + index + ".");
 	}
 
   public Point5d getMaximumFeedrates() {
@@ -522,15 +516,14 @@ public class MachineModel
   public Point5d getHomingFeedrates() {
 	    return homingFeedrates;
 	  }
-  
+
   public Point5d getTimeOut() {
       return timeOut;
 	  }
-  
+
   /** returns the endstop configuration for the given axis */
   public Endstops getEndstops(AxisId axis)
   {
 	  return this.endstops.get(axis);
   }
-
 }
