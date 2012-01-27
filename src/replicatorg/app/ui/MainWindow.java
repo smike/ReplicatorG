@@ -27,6 +27,7 @@
 
 package replicatorg.app.ui;
 
+import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Component;
@@ -66,6 +67,8 @@ import java.util.Date;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Timer;
+import java.util.TimerTask;
 import java.util.Vector;
 import java.util.logging.Level;
 import java.util.prefs.BackingStoreException;
@@ -75,6 +78,7 @@ import java.util.regex.Pattern;
 import javax.swing.AbstractAction;
 import javax.swing.Action;
 import javax.swing.ButtonGroup;
+import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JDialog;
 import javax.swing.JFileChooser;
@@ -90,6 +94,7 @@ import javax.swing.JPopupMenu;
 import javax.swing.JRadioButtonMenuItem;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
+import javax.swing.JTextField;
 import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.event.ChangeEvent;
@@ -114,17 +119,20 @@ import replicatorg.app.syntax.PdeKeywords;
 import replicatorg.app.syntax.PdeTextAreaDefaults;
 import replicatorg.app.syntax.SyntaxDocument;
 import replicatorg.app.syntax.TextAreaPainter;
+import replicatorg.app.tools.IButtonCrc;
 import replicatorg.app.ui.controlpanel.ControlPanelWindow;
 import replicatorg.app.ui.modeling.PreviewPanel;
 import replicatorg.app.util.PythonUtils;
 import replicatorg.app.util.SwingPythonSelector;
 import replicatorg.app.util.serial.Name;
 import replicatorg.app.util.serial.Serial;
+import replicatorg.drivers.Driver;
 import replicatorg.drivers.EstimationDriver;
 import replicatorg.drivers.MultiTool;
 import replicatorg.drivers.OnboardParameters;
 import replicatorg.drivers.RealtimeControl;
 import replicatorg.drivers.SDCardCapture;
+import replicatorg.drivers.SerialDriver;
 import replicatorg.dualstrusion.DualStrusionWorker;
 import replicatorg.machine.MachineFactory;
 import replicatorg.machine.MachineInterface;
@@ -157,7 +165,7 @@ MachineListener, ChangeListener,
 ToolpathGenerator.GeneratorListener
 {
 	/**
-	 * 
+	 *
 	 */
 	private static final long serialVersionUID = 4144538738677712284L;
 
@@ -172,7 +180,7 @@ ToolpathGenerator.GeneratorListener
 
 	MachineLoader machineLoader;
 
-	static public final KeyStroke WINDOW_CLOSE_KEYSTROKE = 
+	static public final KeyStroke WINDOW_CLOSE_KEYSTROKE =
 			KeyStroke.getKeyStroke('W', Toolkit.getDefaultToolkit().getMenuShortcutKeyMask());
 
 	static final int HANDLE_NEW = 1;
@@ -228,7 +236,7 @@ ToolpathGenerator.GeneratorListener
 	JMenuItem combineItem;
 	JMenu changeToolheadMenu = new JMenu("Swap Toolhead in .gcode");
 
-	
+
 	JMenu machineMenu;
 	MachineMenuListener machineMenuListener;
 	SerialMenuListener serialMenuListener;
@@ -236,13 +244,13 @@ ToolpathGenerator.GeneratorListener
 	public boolean building;
 	public boolean simulating;
 	public boolean debugging;
-	
+
 	public boolean buildOnComplete = false;
-	
+
 	private boolean preheatMachine = false;
-	
+
 	PreferencesWindow preferences;
-	
+
 	// boolean presenting;
 
 	// undo fellers
@@ -317,14 +325,14 @@ ToolpathGenerator.GeneratorListener
 		menubar.add(buildMachineMenu());
 		menubar.add(buildThingiverseMenu());
 		menubar.add(buildHelpMenu());
-		
+
 		setJMenuBar(menubar);
 
 		Container pane = getContentPane();
 		MigLayout layout = new MigLayout("nocache,fill,flowy,gap 0 0,ins 0");
 		pane.setLayout(layout);
 
-		buttons = new MainButtonPanel(this);	
+		buttons = new MainButtonPanel(this);
 		pane.add(buttons,"growx,dock north");
 
 		machineStatusPanel = new MachineStatusPanel();
@@ -338,23 +346,99 @@ ToolpathGenerator.GeneratorListener
 
 		cardPanel.add(textarea,GCODE_TAB_KEY);
 		//cardPanel.add(test)
+
 		console = new MessagePanel(this);
-		console.setBorder(null);
+    console.setBorder(null);
 
-		splitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT, cardPanel,
-				console);
+		JPanel bottomPanel = new JPanel(new BorderLayout()); {
+		  JPanel serialInputPanel = new JPanel(new BorderLayout()); {
+		    final JTextField jTextField = new JTextField();
+		    final JCheckBox jCheckBox = new JCheckBox("Payload only");
+		    jCheckBox.setSelected(true);
+		    JButton jButton = new JButton("Send");
+		    jButton.addActionListener(new ActionListener() {
+		      @Override
+		      public void actionPerformed(ActionEvent arg0) {
+		        Driver driver = MainWindow.this.machineLoader.getMachine().getDriver();
+		        if (driver == null || !(driver instanceof SerialDriver)) {
+		          Base.logger.warning("Unable to send message. Not connected with a serial driver.");
+		          return;
+		        }
 
-		new FileDrop( null, cardPanel, /*dragBorder,*/ new FileDrop.Listener()
-		{   public void filesDropped( java.io.File[] files )
-		{   
-			// for( java.io.File file : files )
-			// We can really only handle opening one file, so just try the first one.
-			try {
-				Base.logger.fine( files[0].getCanonicalPath() + "\n" );
-				handleOpen(files[0].getCanonicalPath());
-			} catch (IOException e) {
-			}
-		}   // end filesDropped
+		        SerialDriver serialDriver = (SerialDriver)driver;
+		        final Serial serial = serialDriver.getSerial();
+
+		        boolean payloadOnly = jCheckBox.isSelected();
+
+		        String input = jTextField.getText();
+            String[] words = input.split(" ");
+            byte[] data = new byte[words.length];
+            for (int i = 0; i < words.length; i++) {
+              String word = words[i];
+              data[i] = Integer.decode(word).byteValue();
+            }
+
+            if (payloadOnly) {
+              byte[] newData = new byte[words.length + 3];
+              newData[0] = (byte)0xD5;
+              newData[1] = (byte)words.length;
+              IButtonCrc iButtonCrc = new IButtonCrc();
+              for (int i = 0; i < data.length; i++) {
+                newData[i + 2] = data[i];
+                iButtonCrc.update(data[i]);
+              }
+              newData[newData.length - 1] = iButtonCrc.getCrc();
+              data = newData;
+            }
+
+		        serial.write(data);
+
+		        Timer timer = new Timer();
+		        timer.schedule(new TimerTask() {
+		          @Override
+		          public void run() {
+		            try {
+		              int available = serial.available();
+		              if (available == 0) {
+		                Base.logger.warning("No data to read");
+		              }
+		              byte[] data = new byte[available];
+		              serial.read(data);
+		            } catch (IOException e) {
+		              e.printStackTrace();
+		              Base.logger.warning(e.toString());
+		            }
+		          }
+		        }, 2000);
+		      }
+		    });
+
+		    serialInputPanel.add(jTextField, BorderLayout.CENTER);
+		    JPanel jPanel = new JPanel(); {
+		      jPanel.add(jCheckBox);
+		      jPanel.add(jButton);
+		    }
+		    serialInputPanel.add(jPanel, BorderLayout.EAST);
+		  }
+
+		  bottomPanel.add(serialInputPanel, BorderLayout.NORTH);
+		  bottomPanel.add(console, BorderLayout.CENTER);
+		}
+
+		splitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT, cardPanel, bottomPanel);
+
+		new FileDrop( null, cardPanel, /*dragBorder,*/ new FileDrop.Listener() {
+		  public void filesDropped( java.io.File[] files ) {
+		    // for( java.io.File file : files )
+		    // We can really only handle opening one file, so just try the first one.
+		    try {
+		      Base.logger.fine( files[0].getCanonicalPath() + "\n" );
+		      handleOpen(files[0].getCanonicalPath());
+		    } catch (IOException e) {
+		      e.printStackTrace();
+		      Base.logger.warning(e.toString());
+		    }
+		  }   // end filesDropped
 		}); // end FileDrop.Listener
 
 		//splitPane.setOneTouchExpandable(true);
@@ -438,7 +522,7 @@ ToolpathGenerator.GeneratorListener
 		// Have UI elements listen to machine state.
 		machineLoader.addMachineListener(this);
 		machineLoader.addMachineListener(machineStatusPanel);
-		machineLoader.addMachineListener(buttons);			
+		machineLoader.addMachineListener(buttons);
 	}
 
 	// ...................................................................
@@ -458,7 +542,7 @@ ToolpathGenerator.GeneratorListener
 			int ordinal = Base.preferences.getInt(prefName, InitialOpenBehavior.OPEN_LAST.ordinal());
 			final InitialOpenBehavior openBehavior = InitialOpenBehavior.values()[ordinal];
 			if (openBehavior == InitialOpenBehavior.OPEN_NEW) {
-				handleNew2(true);				
+				handleNew2(true);
 			} else {
 				// Get last path opened; MRU keeps this.
 				Iterator<String> i = mruList.iterator();
@@ -548,7 +632,7 @@ ToolpathGenerator.GeneratorListener
 			generator.editProfiles(this);
 		else { // if no gcode generator is selected (or defaults changed) generator may be null
 			String message = "No Gcode Generator selected. Select a GCode generator \n in the GCode menu, under GCode Generator ";
-			int option = JOptionPane.showConfirmDialog(this, message , "No GCode Generator Selected.", 
+			int option = JOptionPane.showConfirmDialog(this, message , "No GCode Generator Selected.",
 				JOptionPane.OK_OPTION, JOptionPane.QUESTION_MESSAGE);
 		}
 	}
@@ -557,7 +641,7 @@ ToolpathGenerator.GeneratorListener
 		// Check if the model is on the platform
 		if (!getPreviewPanel().getModel().isOnPlatform()) {
 			String message = "The bottom of the model doesn't appear to be touching the build surface, and attempting to print it could damage your machine. Ok to move it to the build platform?";
-			int option = JOptionPane.showConfirmDialog(this, message , "Place model on build surface?", 
+			int option = JOptionPane.showConfirmDialog(this, message , "Place model on build surface?",
 					JOptionPane.YES_NO_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
 			if (option == JOptionPane.CANCEL_OPTION) { return; }
 			if (option == JOptionPane.YES_OPTION) {
@@ -572,7 +656,7 @@ ToolpathGenerator.GeneratorListener
 			final String message = "<html>You have made changes to this model.  Any unsaved changes will<br>" +
 			"not be reflected in the generated toolpath.<br>" +
 			"Save the model now?</html>";
-			int option = JOptionPane.showConfirmDialog(this, message, "Save model?", 
+			int option = JOptionPane.showConfirmDialog(this, message, "Save model?",
 					JOptionPane.YES_NO_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
 			if (option == JOptionPane.CANCEL_OPTION) { return; }
 			if (option == JOptionPane.YES_OPTION) {
@@ -593,7 +677,7 @@ ToolpathGenerator.GeneratorListener
 	private void reloadSerialMenu() {
 		if (serialMenu == null) return;
 
-		serialMenuListener = new SerialMenuListener(); 
+		serialMenuListener = new SerialMenuListener();
 
 		serialMenu.removeAll();
 
@@ -728,8 +812,8 @@ ToolpathGenerator.GeneratorListener
 		menu.add(mruMenu);
 
 		menu.addSeparator();
-		menu.add(buildExamplesMenu()); 
-		menu.add(buildScriptsMenu()); 
+		menu.add(buildExamplesMenu());
+		menu.add(buildScriptsMenu());
 
 		// macosx already has its own preferences and quit menu
 		if (!Base.isMacOS()) {
@@ -755,14 +839,14 @@ ToolpathGenerator.GeneratorListener
 		return menu;
 	}
 
-	/* Creates a menu item 'Thingiverse' 
+	/* Creates a menu item 'Thingiverse'
 	 * @returns a JMenu populated with Thingiverse items
 	 */
 	protected JMenu buildThingiverseMenu()
 	{
 		JMenuItem item;
 		JMenu menu = new JMenu("Thingiverse");
-		
+
 		item = new JMenuItem("What's New?");
 		item.addActionListener( new ActionListener(){
 			//do bare bones launch
@@ -781,7 +865,7 @@ ToolpathGenerator.GeneratorListener
 			}
 		});
 		menu.add(item);
-		
+
 		item = new JMenuItem("What's Popular?");
 		item.addActionListener( new ActionListener(){
 			//do bare bones launch
@@ -800,8 +884,8 @@ ToolpathGenerator.GeneratorListener
 			}
 		});
 		menu.add(item);
-		
-		
+
+
 		return menu;
 	}
 
@@ -813,7 +897,7 @@ ToolpathGenerator.GeneratorListener
 	{
 		JMenuItem item;
 		JMenu menu = new JMenu("Help");
-		
+
 		item = new JMenuItem("Offline Documentation");
 		item.addActionListener(new ActionListener(){
 			@Override
@@ -831,7 +915,7 @@ ToolpathGenerator.GeneratorListener
 			}
 		});
 		menu.add(item);
-		
+
 		item = new JMenuItem("Supported GCodes");
 		item.addActionListener(new ActionListener(){
 			@Override
@@ -847,14 +931,14 @@ ToolpathGenerator.GeneratorListener
 				pane.selectInitialValue();
 				dialog.setResizable(true); // since the list is long, make the dialog resizeable
 				dialog.setVisible(true);
-				dialog.dispose();		
+				dialog.dispose();
 			}
 		});
 		menu.add(item);
-		
+
 		return menu;
 	}
-	
+
 	private JMenuItem buildMenuFromPath(File path, Pattern pattern) {
 		if (!path.exists()) { return null; }
 		if (path.isDirectory()) {
@@ -1005,7 +1089,7 @@ ToolpathGenerator.GeneratorListener
 		menu.add(profilesMenuItem);
 
 		menu.addSeparator();
-		
+
 		//Change Toolhead of GCode
 		JMenuItem left = new JMenuItem("to use T1 (aka Left/A)");
 		left.addActionListener(new ActionListener()
@@ -1022,7 +1106,7 @@ ToolpathGenerator.GeneratorListener
 					// TODO Auto-generated catch block
 					e.printStackTrace();
 				}
-			}	
+			}
 		});
 		JMenuItem right = new JMenuItem("to use T0 (aka Right/B)");
 		right.addActionListener(new ActionListener()
@@ -1040,7 +1124,7 @@ ToolpathGenerator.GeneratorListener
 					e.printStackTrace();
 				}
 
-			}	
+			}
 		});
 		changeToolheadMenu.add(left);
 		changeToolheadMenu.add(right);
@@ -1066,7 +1150,7 @@ ToolpathGenerator.GeneratorListener
 		menu.add(combineItem);
 		combineItem.setEnabled(true);
 */
-		
+
 		return menu;
 	}
 
@@ -1150,7 +1234,7 @@ ToolpathGenerator.GeneratorListener
 
 		infoPanelItem.setVisible(true);
 		menu.add(infoPanelItem);
-		
+
 		preheatItem = new JMenuItem("preheat Not Set");
 		preheatItem.addActionListener(new ActionListener(){
 			@Override
@@ -1160,20 +1244,20 @@ ToolpathGenerator.GeneratorListener
 		});
 		menu.add(preheatItem);
 		preheatItem.setEnabled(false);
-		
+
 		// to put the correct text in the menu, we'll call preheat here
 		doPreheat(false);
 
 		return menu;
 	}
-	
+
 	///  called when the preheat button is toggled
 	protected void handlePreheat()
 	{
 		preheatMachine = !preheatMachine;
 		doPreheat(preheatMachine);
 	}
-	
+
 	/**
 	 * Function enables/disables preheat and updates gui to reflect the state of preheat.
 	 * @param preheat true/false to indicate if we want preheat running
@@ -1183,9 +1267,9 @@ ToolpathGenerator.GeneratorListener
 		int tool0Target = 0;
 		int tool1Target = 0;
 		int platTarget = 0;
-		
+
 		preheatMachine = preheat;
-		
+
 		if(preheatMachine)
 		{
 			preheatItem.setText("Turn off preheat");
@@ -1197,9 +1281,9 @@ ToolpathGenerator.GeneratorListener
 			preheatItem.setToolTipText("Tells the machine to begin warming up to the temperature specified in preferences");
 		}
 		//preheatItem.setArmed(preheatMachine);
-		
+
 		MachineInterface machine = getMachine();
-		
+
 		if(machine != null && !building)
 		{
 			if(preheatMachine)
@@ -1269,7 +1353,7 @@ ToolpathGenerator.GeneratorListener
 			}
 		}
 	}
-	
+
 	/// Returns True of the selected machine has 2 or more toolheads
 	public boolean isDualDriver()
 	{
@@ -1292,25 +1376,25 @@ ToolpathGenerator.GeneratorListener
 		}
 		return false;
 	}
-	
-	
-	/** 
+
+
+	/**
 	 *  Enable dual extrusion items in the GUI
 	 */
 	private void setDualStrusionGUI(boolean isBuilding)
 	{
 		boolean enable = isDualDriver() & ! isBuilding;
-		
+
 		dualstrusionItem.setEnabled(enable);
 		changeToolheadMenu.setEnabled(enable);
 	}
 
 	/**
 	 * Class for handling Machine Menu actions
-	 */	
+	 */
 	class MachineMenuListener implements ActionListener {
 
-		/* a quick case insensitive match function. 
+		/* a quick case insensitive match function.
 		 * @returns true of subString is in baseString (case insensitive), false otherwise
 		 **/
 		public boolean containsIgnoreCase(String baseString, String subString) {
@@ -1333,11 +1417,11 @@ ToolpathGenerator.GeneratorListener
 			if (e.getSource() instanceof JRadioButtonMenuItem) {
 				JRadioButtonMenuItem item = (JRadioButtonMenuItem) e.getSource();
 				final String name = item.getText();
-				
+
 				//if new machine driver name have "Mk5" and the previous driver name does not
-				if(containsIgnoreCase(name, "MK5" ) && 
+				if(containsIgnoreCase(name, "MK5" ) &&
 						(containsIgnoreCase( Base.preferences.get("machine.name", null), "MK5") ==  false ) )
-				{ 
+				{
 					String msg = new String("MK6 or newer  downgrading to MK5 requires manual changes.\n Search 'Mk5 Extruder Downgrade' on http://wiki.makerbot.com for instructions.");
 					JOptionPane.showMessageDialog(null, msg,  "Warning:Manual Downgrade to MK5 Needed", JOptionPane.WARNING_MESSAGE);
 
@@ -1362,7 +1446,7 @@ ToolpathGenerator.GeneratorListener
 			}
 		}
 	}
-	
+
 	/* Function to generate a list of
 	 * supported machines to be displayed in the Driver menu item.
 	 */
@@ -1380,14 +1464,14 @@ ToolpathGenerator.GeneratorListener
 			exception.printStackTrace();
 		}
 		Collections.sort(names);
-		
-		
+
+
 		ButtonGroup radiogroup = new ButtonGroup();
 		for (String name : names ) {
 
 			JRadioButtonMenuItem item = new JRadioButtonMenuItem(name);
 			item.setSelected(name.equals(Base.preferences.get("machine.name",null)));
-			item.addActionListener(machineMenuListener);			
+			item.addActionListener(machineMenuListener);
 
 			radiogroup.add(item);
 			machineMenu.add(item);
@@ -1711,7 +1795,7 @@ ToolpathGenerator.GeneratorListener
 		}
 
 		ExtruderOnboardParameters eop = new ExtruderOnboardParameters((OnboardParameters)machineLoader.getDriver());
-		
+
 		// We should be able to do both heads at once, now.
 //		if(isDualDriver())
 //		{
@@ -1725,13 +1809,13 @@ ToolpathGenerator.GeneratorListener
 	}
 
 	/**
-	 *  Function to handle apple stype prefernces access via MJRPrefsHandler. Opens preferences window. 
+	 *  Function to handle apple stype prefernces access via MJRPrefsHandler. Opens preferences window.
 	 */
-	public void handlePrefs() 
+	public void handlePrefs()
 	{
 		showPrefsWindow();
 	}
-	
+
 	/**
 	 * Show the preferences window, creating a new copy of the window if necessassary.
 	 */
@@ -1868,7 +1952,7 @@ ToolpathGenerator.GeneratorListener
 		simulating = false;
 		setEditorBusy(false);
 	}
-	
+
 	/// Enum to indicate target build intention
 	/// generate-from-stl and build, cancel build, or siply build from gcode
 	enum BuildFlag
@@ -1876,10 +1960,10 @@ ToolpathGenerator.GeneratorListener
 		NONE(0), /// Canceled or software error
 		GEN_AND_BUILD(1), //genrate new gcode and build
 		JUST_BUILD(2); //expect someone checked for existing gcode, and build that
-		
+
 		public final int number;
-		
-		/// standard constructor. 
+
+		/// standard constructor.
 		private BuildFlag(int n){
 			number = n;
 		}
@@ -1913,18 +1997,18 @@ ToolpathGenerator.GeneratorListener
 						"WARNING: Printing from Model View. \n","Overwrite existing gcode for this model?\n\n",
 						showCheck
 						};
-				int option = JOptionPane.showOptionDialog(this, message, "Re-generate Gcode?", 
+				int option = JOptionPane.showOptionDialog(this, message, "Re-generate Gcode?",
 					JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE,
 					null, choices, choices[1]);
 
 				if(showCheck.isSelected())
-					Base.preferences.putBoolean("build.showRegenCheck", false); 
-				 
-				if(option == JOptionPane.CLOSED_OPTION) 	
+					Base.preferences.putBoolean("build.showRegenCheck", false);
+
+				if(option == JOptionPane.CLOSED_OPTION)
 					flag = BuildFlag.NONE; //exit clicked
-				else if(option == 0 )  
+				else if(option == 0 )
 					flag = BuildFlag.GEN_AND_BUILD; //gen and build
-				else if (option == 1) 
+				else if (option == 1)
 					flag = BuildFlag.JUST_BUILD; //build from old generation
 			}
 			else
@@ -1935,7 +2019,7 @@ ToolpathGenerator.GeneratorListener
 		}
 		return flag;
 	}
-	
+
 	public void handleBuild() {
 		if (building)
 			return;
@@ -1943,22 +2027,22 @@ ToolpathGenerator.GeneratorListener
 			return;
 
 		BuildFlag buildFlag = detectBuildIntention();
-			
+
 		if(buildFlag == BuildFlag.NONE) {
 			return; //exit ro cancel clicked
 		}
 		if(buildFlag == BuildFlag.GEN_AND_BUILD) {
 			//'rewrite' clicked
 			buildOnComplete = true;
-			doPreheat(Base.preferences.getBoolean("build.doPreheat", false));				
+			doPreheat(Base.preferences.getBoolean("build.doPreheat", false));
 			runToolpathGenerator(Base.preferences.getBoolean("build.autoGenerateGcode", false));
 		}
 		if(buildFlag == BuildFlag.JUST_BUILD) {
 			//'use existing' clicked
-			doBuild(); 
+			doBuild();
 		}
 	}
-	
+
 	public void doBuild()
 	{
 		if (!machineLoader.isLoaded()) {
@@ -1970,17 +2054,17 @@ ToolpathGenerator.GeneratorListener
 			if (machineLoader.isLoaded()) {
 				machineLoader.getMachine().stopAll();
 			}
-			
+
 			// build specific stuff
 			building = true;
-			setEditorBusy(true);		
+			setEditorBusy(true);
 			doPreheat(true);
-			
+
 			// start our building thread.
-			
+
 			message("Building...");
 			buildStart = new Date();
-			
+
 			//doing this check allows us to recover from pre-build stuff
 			if(machineLoader.getMachine().buildDirect(new JEditTextAreaSource(textarea)) == false)
 			{
@@ -2024,7 +2108,7 @@ ToolpathGenerator.GeneratorListener
 	private class ExtensionFilter extends FileFilter {
 		private LinkedList<String> extensions = new LinkedList<String>();
 		private String description;
-		public ExtensionFilter(String extension,String description) { 
+		public ExtensionFilter(String extension,String description) {
 			this.extensions.add(extension);
 			this.description = description;
 		}
@@ -2203,7 +2287,7 @@ ToolpathGenerator.GeneratorListener
 		}
 
 		// Enable the machine select and serial select menus only when the machine is not connected
-		for (int itemIndex = 0; itemIndex < serialMenu.getItemCount(); itemIndex++) { 
+		for (int itemIndex = 0; itemIndex < serialMenu.getItemCount(); itemIndex++) {
 			JMenuItem item = serialMenu.getItem(itemIndex);
 			// The ignore case is a little hacky, and is based on code in reloadSerialMenu()
 			if  (item != null && !("No serial ports detected".equals(item.getText()))) {
@@ -2211,7 +2295,7 @@ ToolpathGenerator.GeneratorListener
 			}
 		}
 
-		for (int itemIndex = 0; itemIndex < machineMenu.getItemCount(); itemIndex++) { 
+		for (int itemIndex = 0; itemIndex < machineMenu.getItemCount(); itemIndex++) {
 			JMenuItem item = machineMenu.getItem(itemIndex);
 			if  (item!= null) {
 				item.setEnabled(!evt.getState().isConnected());
@@ -2233,14 +2317,14 @@ ToolpathGenerator.GeneratorListener
 		onboardParamsItem.setEnabled(showParams);
 		extruderParamsItem.setEnabled(showParams);
 		preheatItem.setEnabled(evt.getState().isConnected() && !building);
-		
-		boolean showIndexing = 
+
+		boolean showIndexing =
 			evt.getState().isConfigurable() &&
 			machineLoader.getDriver() instanceof MultiTool &&
 			((MultiTool)machineLoader.getDriver()).toolsCanBeReindexed();
 		toolheadIndexingItem.setVisible(showIndexing);
 
-		boolean showRealtimeTuning = 
+		boolean showRealtimeTuning =
 			evt.getState().isConnected() &&
 			machineLoader.getDriver() instanceof RealtimeControl &&
 			((RealtimeControl)machineLoader.getDriver()).hasFeatureRealtimeControl();
@@ -2276,9 +2360,9 @@ ToolpathGenerator.GeneratorListener
 		setVisible(true);
 		textarea.setEnabled(!isBusy);
 		textarea.setEditable(!isBusy);
-		
+
 		setDualStrusionGUI(isBusy);
-		
+
 		if (isBusy) {
 			textarea.selectNone();
 			textarea.scrollTo(0, 0);
@@ -2333,7 +2417,7 @@ ToolpathGenerator.GeneratorListener
 		if (machineLoader.isLoaded()) {
 			if (machineLoader.getMachine().getSimulatorDriver() != null)
 				machineLoader.getMachine().getSimulatorDriver().destroyWindow();
-		}	
+		}
 
 		setEditorBusy(false);
 	}
@@ -2359,7 +2443,7 @@ ToolpathGenerator.GeneratorListener
 	}
 
 	/**
-	 *  Stops the machine from running, and sets gui to 
+	 *  Stops the machine from running, and sets gui to
 	 *  'no build running' mode
 	 */
 	public void handleStop() {
@@ -2390,7 +2474,7 @@ ToolpathGenerator.GeneratorListener
 		{
 			final String message = "<html>In order to dualstrude you need to save<br>" +
 			"Save the model now?</html>";
-			int option = JOptionPane.showConfirmDialog(this, message, "Save model?", 
+			int option = JOptionPane.showConfirmDialog(this, message, "Save model?",
 					JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
 			if (option == JOptionPane.NO_OPTION) { return; }
 			if (option == JOptionPane.YES_OPTION) {
@@ -2416,16 +2500,16 @@ ToolpathGenerator.GeneratorListener
 		}
 
 	}
-	
+
 	public void handleCombination()
 	{
 		//TODO: Constructors shouldn't auto-display. Refactor that
 		if(getBuild() != null)
-			new CombineWindow(getBuild().folder.getAbsolutePath() + File.separator + getBuild().getName() + ".stl", this);	
+			new CombineWindow(getBuild().folder.getAbsolutePath() + File.separator + getBuild().getName() + ".stl", this);
 		else
 			new CombineWindow(this);
 	}
-	
+
 	public void estimationOver() {
 		// stopItem.setEnabled(false);
 		// pauseItem.setEnabled(false);
@@ -2433,7 +2517,7 @@ ToolpathGenerator.GeneratorListener
 	}
 
 	/**
-	 *  Send stop commnad to loaded machine, 
+	 *  Send stop commnad to loaded machine,
 	 *  Disables pre-heating, and sets building values to false/off
 	 */
 	public void doStop() {
@@ -2565,9 +2649,9 @@ ToolpathGenerator.GeneratorListener
 		if (machineLoader.isLoaded() && machineLoader.getMachine().getMachineState().isBuilding()) {
 			final String message = "<html>You are currently printing from ReplicatorG! Your build will be stopped.<br>" +
 			"Continue and abort print?</html>";
-			int option = JOptionPane.showConfirmDialog(this, message, "Abort print?", 
+			int option = JOptionPane.showConfirmDialog(this, message, "Abort print?",
 					JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
-			if (option == JOptionPane.CANCEL_OPTION) 
+			if (option == JOptionPane.CANCEL_OPTION)
 			{ return false; }
 
 			// Stop the build.
@@ -2629,7 +2713,7 @@ ToolpathGenerator.GeneratorListener
 	/**
 	 * Does all the plumbing to create a new project then calls handleOpen to
 	 * load it up.
-	 * 
+	 *
 	 * @param noPrompt
 	 *            true to disable prompting for the sketch name, used when the
 	 *            app is starting (auto-create a sketch)
@@ -2800,7 +2884,7 @@ ToolpathGenerator.GeneratorListener
 					// this is used when another operation calls a save
 				}
 			}
-		};		
+		};
 		if (force) { saveWork.run(); }
 		else { SwingUtilities.invokeLater(saveWork); }
 	}
@@ -2989,7 +3073,7 @@ ToolpathGenerator.GeneratorListener
 		JMenuItem cutItem, copyItem;
 
 		JMenuItem referenceItem;
-		
+
 		/**
 		 * Builds a complete pop-up menu, including standard cut/paste/copy items
 		 * Items that are not usable will be grey'd out
@@ -3073,14 +3157,14 @@ ToolpathGenerator.GeneratorListener
 		// 2. If the new machine uses a serial port, connect to the serial port
 		// 3. If this is a new machine, record a reference to it
 		// 4. Hook the machine to the main window.
-		
+
 		boolean loaded = machineLoader.load(name);
-		
+
 		if(loaded == false) {
 			Base.logger.severe("could not load machine '" + name + "' please check Driver-> <Machine Name> ");
 			return;
 		}
-		
+
 		String targetPort;
 
 		targetPort = Base.preferences.get("serial.last_selected", null);
@@ -3138,11 +3222,11 @@ ToolpathGenerator.GeneratorListener
 		// We get a change event when another tab is selected.
 		setCurrentElement(header.getSelectedElement());
 	}
-	
+
 	/**
-	 * This function takes standard skeinforge output, and converts it 
+	 * This function takes standard skeinforge output, and converts it
 	 * to be proper code for running a single material build on a dual material machine
-	 * 
+	 *
 	 * @param source file containing single extruder gcode
 	 */
 
@@ -3162,7 +3246,7 @@ ToolpathGenerator.GeneratorListener
 				handleOpen2(build.getCode().file.getAbsolutePath() );
 			}
 			else {
-				Base.logger.finer("cannot use Dual Extrusion without Print-O-Matic");						
+				Base.logger.finer("cannot use Dual Extrusion without Print-O-Matic");
 			}
 		}
 		catch(NullPointerException e)
@@ -3171,8 +3255,8 @@ ToolpathGenerator.GeneratorListener
 			Base.logger.severe("Error doing toolhead update in generationComplete" + e);
 		}
 	}
-	
-	
+
+
 	/** Function called automatically when new gcode generation completes
 	 *  does post-processing for newly created gcode
 	 * @param completion
@@ -3185,23 +3269,23 @@ ToolpathGenerator.GeneratorListener
 			if (build.getCode() != null) {
 				setCode(build.getCode());
 			}
-			
+
 			/// a dual extruder machine is selected, start/end gcode must be updated accordingly
 			//TODO: this seems to be causing two gcode tabs containing the same gcode to appear
 			// but only when there is no gcode tab open already. they even seem to share the scrollbar?
 			if (isDualDriver()) {
 				singleMaterialDualstrusionModifications(build.getCode().file);
 			}
-			
+
 			buttons.updateFromMachine(machineLoader.getMachine());
 			updateBuild();
-			
+
 			if(buildOnComplete)
 			{
 				doBuild();
 			}
 		}
-		
+
 		if(buildOnComplete) // for safety, always reset this
 		{
 			buildOnComplete = false;
