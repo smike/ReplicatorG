@@ -24,8 +24,6 @@ import java.util.Queue;
 import java.util.logging.Level;
 
 import javax.swing.JOptionPane;
-import javax.swing.JScrollPane;
-import javax.swing.JTextArea;
 
 import org.w3c.dom.Node;
 

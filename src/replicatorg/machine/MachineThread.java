@@ -3,13 +3,11 @@ package replicatorg.machine;
 import java.util.Vector;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
-
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 
 import replicatorg.app.Base;
 import replicatorg.app.tools.XML;
-import replicatorg.drivers.BadFirmwareVersionException;
 import replicatorg.drivers.Driver;
 import replicatorg.drivers.DriverError;
 import replicatorg.drivers.DriverFactory;
@@ -23,8 +21,8 @@ import replicatorg.drivers.commands.AssessState;
 import replicatorg.drivers.commands.DriverCommand;
 import replicatorg.machine.Machine.JobTarget;
 import replicatorg.machine.Machine.RequestType;
-import replicatorg.machine.builder.MachineBuilder;
 import replicatorg.machine.builder.Direct;
+import replicatorg.machine.builder.MachineBuilder;
 import replicatorg.machine.builder.ToLocalFile;
 import replicatorg.machine.builder.ToRemoteFile;
 import replicatorg.machine.builder.UsingRemoteFile;
@@ -40,27 +38,27 @@ import replicatorg.model.StringListSource;
 class MachineThread extends Thread {
 
 	AssessStatusThread statusThread;
-	
+
 	// TODO: Should this be here?
 	class AssessStatusThread extends Thread {
-		
+
 		MachineThread machineThread;
-		
+
 		public AssessStatusThread(MachineThread machineThread) {
 			super("Assess Status");
 			this.machineThread = machineThread;
 		}
-		
+
 		public void run() {
 			while (true) {
 				try {
 					synchronized(this) {
 						// Send out a request, then sleep for a bit, then start over.
 						DriverCommand assessCommand = new AssessState();
-						
+
 						machineThread.scheduleRequest(new MachineCommand(
 								RequestType.RUN_COMMAND, assessCommand));
-						
+
 						sleep(1000);
 					}
 				} catch(InterruptedException e) {
@@ -70,24 +68,24 @@ class MachineThread extends Thread {
 			}
 		}
 	}
-	
-	// TODO: The timeout/elapse behaivor of this is 
+
+	// TODO: The timeout/elapse behaivor of this is
 	// a little wonky. It could be converted to some standard timer someday
 	class MachineTimer {
 		private long lastEventTime = 0;
 		private boolean enabled = false;
 		private long intervalMs = 1000;
-		
+
 		public void start(long interval) {
 			enabled = true;
 			intervalMs = interval;
 			lastEventTime = System.currentTimeMillis();
 		}
-		
+
 		public void stop() {
 			enabled = false;
 		}
-		
+
 		// checks for timeout elapsing, and resets the time for a new interval
 		public boolean elapsed() {
 			if (!enabled) {
@@ -101,61 +99,61 @@ class MachineThread extends Thread {
 			return false;
 		}
 	}
-	
+
 	private MachineTimer pollingTimer;
 
 	// Link of machine commands to run
 	ConcurrentLinkedQueue<MachineCommand> pendingQueue;
-		
+
 	// this is the xml config for this machine.
 	private Node machineNode;
-	
+
 	private Machine controller;
-	
+
 	// our warmup/cooldown commands
 	private Vector<String> warmupCommands;
 	private Vector<String> cooldownCommands;
-	
+
 	// The name of our machine.
 	private String name;
-	
+
 	// Things that belong to a job
 		// estimated build time in millis
 		private double estimatedBuildTime = 0;
-	
+
 		// Build statistics
 		private double startTimeMillis = -1;
-	
+
 	// Our driver object. Null when no driver is selected.
 	private Driver driver = null;
-	
+
 	// the simulator driver
 	private SimulationDriver simulator;
-	
+
 	private MachineState state = new MachineState(MachineState.State.NOT_ATTACHED);
 
 	// ???
 	MachineModel cachedModel = null;
-	
+
 	private MachineBuilder machineBuilder;
-	
+
 	public MachineThread(Machine controller, Node machineNode) {
 		super("Machine Thread");
-		
+
 		pollingTimer = new MachineTimer();
 		pollingTimer.start(1000);
-		
+
 		pendingQueue = new ConcurrentLinkedQueue<MachineCommand>();
-		
+
 		// save our XML
 		this.machineNode = machineNode;
 		this.controller = controller;
-		
+
 		// load our various objects
 		loadDriver();
 		loadExtraPrefs();
 		parseName();
-		
+
 		statusThread = new AssessStatusThread(this);
 		statusThread.start();
 	}
@@ -204,41 +202,41 @@ class MachineThread extends Thread {
 		sources.add(new StringListSource(cooldownCommands));
 		return new GCodeSourceCollection(sources);
 	}
-	
+
 	private String readyMessage() {
 		return "Machine " + getMachineName() + " ready";
 	}
-	
+
 	private String notConnectedMessage() {
 		return "Not Connected";
 	}
-	
+
 	private String buildingMessage() {
 		return "Building...";
 	}
-	
+
 	// Respond to a command from the machine controller
-	void runCommand(MachineCommand command) {		
+	void runCommand(MachineCommand command) {
 		switch(command.type) {
 		case CONNECT:
 			if (state.getState() == MachineState.State.NOT_ATTACHED) {
-				
+
 				// TODO: This message doesn't take an explicit override into account.
 				setState(new MachineState(MachineState.State.CONNECTING),
 						"Connecting to " + getMachineName() + " on " + command.remoteName);
-				
+
 				boolean connected = false;
-				
+
 				// First, try to open the serial port
 				if (driver instanceof UsesSerial) {
 					UsesSerial us = (UsesSerial)driver;
-					
+
 					String targetPort = command.remoteName;
-					
+
 					if (us.isExplicit()) {
 						targetPort = us.getPortName();
 					}
-					
+
 					us.openSerial(targetPort);
 					connected = us.isConnected();
 				}
@@ -247,22 +245,22 @@ class MachineThread extends Thread {
 					if (!driver.isInitialized()) {
 						driver.initialize();
 					}
-					
+
 					connected = driver.isInitialized();
 				}
-				
+
 				if (!connected) {
 					// If we couldn't connect, move back to being detached.
 					String errorMessage = null;
-					
+
 					if (driver.hasError()) {
 						errorMessage = driver.getError().getMessage();
 					}
-					
+
 					setState(new MachineState(MachineState.State.NOT_ATTACHED), errorMessage);
 				}
 				else {
-					
+
 					// If the port is open, try to talk to the machine over it.
 					driver.initialize();
 					if (driver.isInitialized()) {
@@ -280,7 +278,7 @@ class MachineThread extends Thread {
 			if (state.isConnected()) {
 				driver.uninitialize();
 				setState(new MachineState(MachineState.State.NOT_ATTACHED), notConnectedMessage());
-			
+
 				if (driver instanceof UsesSerial) {
 					UsesSerial us = (UsesSerial)driver;
 					us.closeSerial();
@@ -302,15 +300,15 @@ class MachineThread extends Thread {
 				if (!isSimulating()) {
 					driver.getCurrentPosition(false); // reconcile position
 				}
-				
+
 				// Pad the job with start and end code
 				GCodeSource combinedSource = buildGCodeJob(command.source);
-				
+
 				machineBuilder = new Direct(driver, simulator, combinedSource);
-				
+
 				// TODO: This shouldn't be done here?
 				driver.invalidatePosition();
-				
+
 				// TODO: Where should the build name be specified?
 				setState(new MachineState(MachineState.State.BUILDING), buildingMessage());
 			}
@@ -324,20 +322,20 @@ class MachineThread extends Thread {
 				if (!(driver instanceof SDCardCapture)) {
 					break;
 				}
-				
+
 				startTimeMillis = System.currentTimeMillis();
-				
+
 				// Pad the job with start and end code
 				GCodeSource combinedSource = buildGCodeJob(command.source);
-				
+
 				ToRemoteFile trf = new ToRemoteFile(driver, simulator, combinedSource, command.remoteName);
 				if(trf.setupFailed)
 				{
 					//I am ashamed of this, but without adding a new state of "BUILD_CANCELLED"
-					// and making some changes to MainWindow.MachineStateChanged(), or by 
+					// and making some changes to MainWindow.MachineStateChanged(), or by
 					// changing the whole process by which this gets called, there is, apparently,
 					// no way to keep a "Build finished" dialog from popping up when this fails.
-					
+
 					//By calling not-attached we get the mainwindow to forget that it had started
 					// a print, so that the following call to ready doesn't pop up a message
 					// this may have unintended side effects>
@@ -345,7 +343,7 @@ class MachineThread extends Thread {
 					setState(new MachineState(MachineState.State.READY));
 					break;
 				}
-				
+
 				machineBuilder = trf;
 
 				// TODO: This shouldn't be done here?
@@ -360,14 +358,14 @@ class MachineThread extends Thread {
 				if (!(driver instanceof SDCardCapture)) {
 					break;
 				}
-				
+
 				startTimeMillis = System.currentTimeMillis();
 
 				// There is no need to reconcile the position.
-				
+
 				// Pad the job with start and end code
 				GCodeSource combinedSource = buildGCodeJob(command.source);
-				
+
 				ToLocalFile lf = new ToLocalFile(driver, simulator,	combinedSource, command.remoteName);
 				if(lf.setupFailed)
 				{
@@ -383,9 +381,9 @@ class MachineThread extends Thread {
 						setState(new MachineState(MachineState.State.READY));
 					break;
 				}
-				
+
 				machineBuilder = lf;
-				
+
 				if (state.canPrint()) {
 					setState(new MachineState(MachineState.State.BUILDING), buildingMessage());
 				} else {
@@ -398,19 +396,19 @@ class MachineThread extends Thread {
 				if (!(driver instanceof SDCardCapture)) {
 					break;
 				}
-				
+
 				startTimeMillis = System.currentTimeMillis();
-				
+
 				machineBuilder = new UsingRemoteFile(driver, command.remoteName);
-			
+
 //				// TODO: what about this?
 //				System.out.println("pre-");
 //				driver.getCurrentPosition(false); // reconcile position
 //				System.out.println("post-");
-				
+
 				// TODO: is this what we wanted?
 				driver.invalidatePosition();
-				
+
 				setState(new MachineState(MachineState.State.BUILDING), buildingMessage());
 			}
 			break;
@@ -426,7 +424,7 @@ class MachineThread extends Thread {
 			break;
 		case STOP_MOTION:
 			driver.stop(false);
-			
+
 			if (state.getState() == MachineState.State.BUILDING) {
 				setState(new MachineState(MachineState.State.READY),
 						readyMessage());
@@ -440,9 +438,9 @@ class MachineThread extends Thread {
 			// TODO: This should be handled at the driver level?
 			driver.getMachine().currentTool().setTargetTemperature(0);
 			driver.getMachine().currentTool().setPlatformTargetTemperature(0);
-			
+
 			driver.stop(true);
-			
+
 			if (state.getState() == MachineState.State.BUILDING) {
 				setState(new MachineState(MachineState.State.READY),
 						readyMessage());
@@ -451,14 +449,14 @@ class MachineThread extends Thread {
 				setState(new MachineState(MachineState.State.NOT_ATTACHED),
 						notConnectedMessage());
 			}
-			break;			
+			break;
 //		case DISCONNECT_REMOTE_BUILD:
 //			// TODO: This is wrong.
-//			
+//
 //			if (state.getState() == MachineState.State.BUILDING_REMOTE) {
 //				return; // send no further packets to machine; let it go on its own
 //			}
-//			
+//
 //			if (state.isBuilding()) {
 //				setState(MachineState.State.STOPPING);
 //			}
@@ -467,7 +465,7 @@ class MachineThread extends Thread {
 			if (state.isConnected()) {
 				boolean completed = false;
 				// TODO: Don't get stuck in a loop here!
-				
+
 				while(!completed) {
 					try {
 						command.command.run(driver);
@@ -487,16 +485,16 @@ class MachineThread extends Thread {
 			Base.logger.severe("Ignored command: " + command.type.toString());
 		}
 	}
-	
+
 	/**
 	 * Main machine thread loop.
 	 */
 	public void run() {
-		
-		
+
+
 		// This is our main loop.
 		while (true) {
-			
+
 			// First, check if the driver registered any errors
 			if (driver.hasError()) {
 				DriverError error = driver.getError();
@@ -514,14 +512,14 @@ class MachineThread extends Thread {
 							error.getMessage());
 				}
 			}
-			
+
 			//
-			
+
 			// Check for and run any control requests that might be in the queue.
 			while (!pendingQueue.isEmpty()) {
 				runCommand(pendingQueue.remove());
 			}
-			
+
 			if(state.isConnected())
 			{
 				// Check the status poll machine.
@@ -537,21 +535,21 @@ class MachineThread extends Thread {
 					}
 				}
 			}
-			
+
 			// If we are building
 			if ( state.isBuilding() && !state.isPaused() ) {
 				//run another instruction on the machine.
 				machineBuilder.runNext();
-				
+
 				// Send out a progress event
 				// TODO: Should these be rate limited?
-				MachineProgressEvent progress = 
+				MachineProgressEvent progress =
 					new MachineProgressEvent((double)System.currentTimeMillis()-startTimeMillis,
 							estimatedBuildTime,
 							machineBuilder.getLinesProcessed(),
 							machineBuilder.getLinesTotal());
 				controller.emitProgress(progress);
-				
+
 				if (machineBuilder.finished()) {
 					// TODO: Exit correctly.
 					if (state.getState() == MachineState.State.BUILDING) {
@@ -563,7 +561,7 @@ class MachineThread extends Thread {
 					}
 				}
 			}
-			
+
 			// If there is nothing to do, sleep.
 			if ( !state.isBuilding() ) {
 				try {
@@ -571,36 +569,37 @@ class MachineThread extends Thread {
 						wait();
 					}
 				} catch(InterruptedException e) {
+				  e.printStackTrace();
 					break;
 				}
 			}
-			
+
 			// If we get interrupted, break out of the main loop.
 			if (Thread.interrupted()) {
-		        break;
+		    break;
 			}
 		}
-		
+
 		Base.logger.fine("MachineThread interrupted, terminating.");
 		dispose();
 	}
-	
+
 	public boolean scheduleRequest(MachineCommand request) {
 		pendingQueue.add(request);
 		synchronized(this) { notify(); }
-		
+
 		return true;
 	}
-	
+
 	public boolean isReadyToPrint() { return state.canPrint(); }
-	
+
 
 	/** True if the machine's build is going to the simulator. */
 	public boolean isSimulating() {
 		// TODO: implement this.
 		return false;
 	}
-	
+
 	// TODO: Put this somewhere else
 	public boolean isInteractiveTarget() {
 		if (machineBuilder != null) {
@@ -608,35 +607,35 @@ class MachineThread extends Thread {
 		}
 		return false;
 	}
-	
+
 	public JobTarget getTarget() {
 		if (machineBuilder != null) {
 			return machineBuilder.getTarget();
 		}
 		return JobTarget.NONE;
 	}
-	
+
 	public int getLinesProcessed() {
 		if (machineBuilder != null) {
 			return machineBuilder.getLinesProcessed();
 		}
 		return -1;
 	}
-	
+
 	public MachineState getMachineState() {
 		return state.clone();
 	}
-	
-	
+
+
 	/**
 	 * Set the a machine state.  If the state is not the current state, a state change
-	 * event will be emitted and the machine thread will be notified.  
+	 * event will be emitted and the machine thread will be notified.
 	 * @param state the new state of the machine.
 	 */
 	private void setState(MachineState state) {
 		setState(state, null);
 	}
-	
+
 	private void setState(MachineState state, String message) {
 		MachineState oldState = this.state;
 		this.state = state;
@@ -644,19 +643,19 @@ class MachineThread extends Thread {
 			controller.emitStateChange(state, message);
 		}
 	}
-	
+
 	public Driver getDriver() {
 		return driver;
 	}
-	
+
 	public SimulationDriver getSimulator() {
 		return simulator;
 	}
-	
+
 	public boolean isConnected() {
 		return (driver != null && driver.isInitialized());
 	}
-	
+
 	public void loadDriver() {
 		// load our utility drivers
 		if (Base.preferences.getBoolean("machinecontroller.simulator",true)) {
@@ -664,14 +663,14 @@ class MachineThread extends Thread {
 			simulator = new SimulationDriver();
 			simulator.setMachine(loadModel());
 		}
-		Node driverXml = null; 
+		Node driverXml = null;
 		// load our actual driver
 		NodeList kids = machineNode.getChildNodes();
 		for (int j = 0; j < kids.getLength(); j++) {
 			Node kid = kids.item(j);
 			if (kid.getNodeName().equals("driver")) {
 				driverXml = kid;
-				
+
 			}
 		}
 		driver = DriverFactory.factory(driverXml);
@@ -679,7 +678,7 @@ class MachineThread extends Thread {
 		// Initialization is now handled by the machine thread when it
 		// is placed in a connecting state.
 	}
-	
+
 	private void dispose() {
 		if (driver != null) {
 			driver.dispose();
@@ -687,7 +686,7 @@ class MachineThread extends Thread {
 		if (simulator != null) {
 			simulator.dispose();
 		}
-		
+
 		if (statusThread != null) {
 			try {
 				statusThread.interrupt();
@@ -695,10 +694,10 @@ class MachineThread extends Thread {
 			} catch (InterruptedException e) {
 			}
 		}
-		
+
 		setState(new MachineState(MachineState.State.NOT_ATTACHED));
 	}
-	
+
 	public void readName() {
 		if (driver instanceof OnboardParameters) {
 			String n = ((OnboardParameters)driver).getMachineName();
@@ -710,7 +709,7 @@ class MachineThread extends Thread {
 			}
 		}
 	}
-	
+
 	private void parseName() {
 		NodeList kids = machineNode.getChildNodes();
 
@@ -725,22 +724,22 @@ class MachineThread extends Thread {
 
 		name = "Unknown";
 	}
-	
+
 	private MachineModel loadModel() {
 		MachineModel model = new MachineModel();
 		model.loadXML(machineNode);
 		return model;
 	}
-	
+
 	public MachineModel getModel() {
 		if (cachedModel == null) { cachedModel = loadModel(); }
 		return cachedModel;
 	}
-	
+
 	// TODO: Make this a command.
 	public void setEstimatedBuildTime(double estimatedBuildTime) {
 		this.estimatedBuildTime = estimatedBuildTime;
 	}
-	
+
 	public String getMachineName() { return name; }
 }
